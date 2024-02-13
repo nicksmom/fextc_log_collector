@@ -14,7 +14,7 @@ SYSLOG_SERVER_IP = os.getenv("SYSLOG_SERVER_IP")
 
 # Debug: Print environment variables to check their values
 print("CLIENT_ID:", CLIENT_ID)
-print("PASSWORD:", PASSWORD)  # Be careful with printing passwords in real-world applications
+print("PASSWORD:", PASSWORD)
 print("SYSLOG_SERVER_IP:", SYSLOG_SERVER_IP)
 
 BASE_URL = "https://fortiextender.forticloud.com"
@@ -50,17 +50,19 @@ def refresh_token():
 
 def poll_logs():
     global LAST_POLLED_TIMESTAMP
+    last_index = read_last_index()  # Read the last index processed
     headers = {"Authorization": f"Bearer {ACCESS_TOKEN}"}
     response = requests.get(LOG_URL, headers=headers)
     if response.status_code == 200:
         data = response.json()["payload"]["results"]
+        new_last_index = last_index
         for log_entry in data:
-            # Convert log entry timestamp to datetime for comparison
-            entry_timestamp = datetime.fromtimestamp(log_entry["timestamp"])
-            if LAST_POLLED_TIMESTAMP is None or entry_timestamp > LAST_POLLED_TIMESTAMP:
+            if log_entry["index"] > last_index:  # Check if the log entry is new
                 normalize_and_send_to_syslog(log_entry)
-        if data:
-            LAST_POLLED_TIMESTAMP = datetime.fromtimestamp(data[-1]["timestamp"])
+                new_last_index = max(new_last_index, log_entry["index"])  # Update the new last index
+        
+        if new_last_index != last_index:
+            write_last_index(new_last_index)  # Write the new last index if it has changed
     else:
         print("Failed to retrieve logs")
 
@@ -103,6 +105,16 @@ def normalize_and_send_to_syslog(log_entry):
     # Send the log message
     logger.info(syslog_message)
 
+def read_last_index():
+    try:
+        with open('last_index.txt', 'r') as file:
+            return int(file.read().strip())
+    except (FileNotFoundError, ValueError):
+        return 0  # Return 0 if file does not exist or contains invalid data
+
+def write_last_index(last_index):
+    with open('last_index.txt', 'w') as file:
+        file.write(str(last_index))
 
 def main():
     authenticate()
